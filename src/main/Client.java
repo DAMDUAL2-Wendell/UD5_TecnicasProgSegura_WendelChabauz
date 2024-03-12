@@ -1,16 +1,14 @@
 package main;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.security.KeyFactory;
 import java.security.PublicKey;
-import java.security.spec.X509EncodedKeySpec;
-
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
+import java.util.Base64;
 import javax.crypto.SecretKey;
 
 public class Client extends Thread {
@@ -19,101 +17,117 @@ public class Client extends Thread {
 
 	public static void main(String[] args) {
 		try {
-			// Mensaje que será cifrado usando cifrado asimétrico y enviado al servidor
-			String mensaje = "Mensaje de prueba del cifrado asimétrico";
+			
+
 			System.out.println("Creando socket cliente");
+			// Crear un nuevo socket cliente
 			Socket clientSocket = new Socket();
+
 			System.out.println("Estableciendo la conexión");
+			// Establecer la dirección y el puerto al que se conectará el socket cliente
 			InetSocketAddress addr = new InetSocketAddress("localhost", 5555);
+			// Conectar el socket cliente a la dirección y puerto especificados
 			clientSocket.connect(addr);
-			DataInputStream is = new DataInputStream(clientSocket.getInputStream());
-			DataOutputStream os = new DataOutputStream(clientSocket.getOutputStream());;
+			// Crear un lector de entrada para recibir datos del servidor
+			BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+			// Obtener el flujo de salida del socket cliente para enviar datos al servidor
+			OutputStream os = clientSocket.getOutputStream();
+			// Crear un escritor de salida para enviar datos al servidor
+			PrintWriter out = new PrintWriter(os, true);
+
 
 			// Mensaje para generar claves RSA y recibir luego la clave publica RSA.
 			System.out.println("Enviar petición al servidor para generar claves RSA.");
-			os.write("Generar clave RSA.".getBytes());
+			out.println("Generar clave RSA.");
 
-			System.out.println("Recibiendo clave publica RSA.");
+			
 			// Recibir clave pública RSA del servidor
-			byte[] publica = Cifrado.leerDatosDataInputStream(is,is.readInt());
-            PublicKey clavePublicaRSAServidor = Cifrado.bytesAPublicKey(publica);
+			System.out.println("Recibiendo clave publica RSA.");
+			String publica = in.readLine();
+			System.out.println("Clave publica recibida: " + publica);
+			
+			// Convertir la clave en objeto PublicKey
+            //PublicKey clavePublicaRSAServidor = Cifrado.bytesAPublicKey(publica.getBytes());
+			System.out.println("Convirtiendo clave publica en PublicKey");
+			PublicKey clavePublicaRSAServidor = Cifrado.stringToPublicKey(publica);
+			System.out.println("Clave publica convertida en objeto PublicKey");
             
-            System.out.println("Enviando confirmacion al servidor de que se ha recibido la clave RSA.");
+			
             // Enviar confirmación al servidor después de recibir la clave pública RSA
-            os.write("Clave RSA recibida".getBytes());
-
-            System.out.println("Generando clave AES para cifrar mesajes.");
-            // Generar clave AES para cifrar mensajes
-            SecretKey claveAES = generarClaveAES();
-
-            System.out.println("Cifrando clave AES con clave pública RSA del servidor.");
-            // Cifrar clave AES con clave pública RSA del servidor
-            byte[] claveAESCifrada = cifrarAESconRSA(clavePublicaRSAServidor, claveAES);
-
-            System.out.println("Enviando clave AES cifrada con RSA al servidor...");
-            // Enviar clave AES cifrada al servidor
-            enviarClaveAESCifradaAlServidor(os, claveAESCifrada);
+            System.out.println("Enviando confirmacion al servidor de que se ha recibido la clave RSA.");
+            out.println("Clave RSA recibida");
+            out.flush();
             
-   			
-			System.out.println("Cerrando el socket cliente");
+            
+            // Generar clave AES para cifrar mensajes
+            System.out.println("Generando clave AES para cifrar mesajes.");
+            SecretKey claveAES = Cifrado.generarClaveAES(BITS_CLAVE_AES);
+            System.out.println("Clave AES generada correctamente."); 
+            Cifrado.ImprimirClave("Clave AES sin encriptar: ", claveAES.getEncoded());
+           
 
-			clientSocket.close();
+            // Cifrar clave AES con clave pública RSA del servidor
+            System.out.println("Cifrando clave AES con clave pública RSA del servidor.");
+            //byte[] claveAESCifrada = cifrarAESconRSA(clavePublicaRSAServidor, claveAES);
+            byte[] claveAESCifrada  = EncriptacionRSA.encryptAESWithRSA(clavePublicaRSAServidor, claveAES);
+            System.out.println("Clave AES cifrada correctamente con clave pública RSA.");
+            Cifrado.ImprimirClave("Clave AES encriptada con RSA: ", claveAESCifrada);
+            
 
-			System.out.println("Terminado");
+            // Enviar clave AES cifrada al servidor
+            System.out.println("Enviando clave AES cifrada con RSA al servidor...");
+            // Enviar la longitud de la clave cifrada
+            out.println(claveAESCifrada.length);
+            out.flush();
+
+            // Enviar la clave cifrada
+            os.write(claveAESCifrada);
+            out.flush();
+
+            // Mensaje de confirmación
+            System.out.println("Clave AES cifrada enviada al servidor.");
+
+            // Esperar la confirmación del servidor
+            String confirmacion = in.readLine();
+            System.out.println("Confirmación del servidor: " + confirmacion);
+
+            // Verificar si la confirmación es recibida correctamente
+            if (confirmacion.equals("Clave RSA recibida")) {
+                System.out.println("Clave recibida correctamente");
+            }
+
+            // Cifrar y enviar un mensaje al servidor
+            String mensajeCifrado = EncriptacionAES.cifrarMensajeAES(claveAES, "Este es un mensaje cifrado con AES desde el cliente");
+            System.out.println("Enviando mensaje cifrado al servidor...");
+            out.println(mensajeCifrado);
+            out.flush();
+            System.out.println("Mensaje cifrado con AES enviado al servidor.");
+            
+            
+            // Recibir mensaje cifrado de servidor
+            System.out.println("Esperando respuesta del servidor.");
+            String mensajeCifradoServidor = in.readLine();
+            System.out.println("Mensaje cifrado recibido del servidor: " + mensajeCifradoServidor);
+
+            // Decodificar el mensaje cifrado desde Base64
+            byte[] mensajeCifradoBytes = Base64.getDecoder().decode(mensajeCifradoServidor);
+
+            // Descifrar el mensaje
+            String mensajeDescifradoServidor = EncriptacionAES.descifrarMensajeAES2(claveAES, mensajeCifradoBytes);
+
+            // Mostrar mensaje del servidor
+            System.out.println("Mensaje descifrado del servidor: " + mensajeDescifradoServidor);
+
+            
+            // Cerrar socket cliente
+            System.out.println("Cerrando el socket cliente");
+            clientSocket.close();
+            System.out.println("Terminado");
 
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
 	}
-	
-	
-	
 
-	private static PublicKey recibirClavePublicaRSA(DataInputStream entrada) {
-	    try {
-	        // Recibir clave pública RSA del servidor
-	        byte[] clavePublicaEncoded = new byte[entrada.readInt()];
-	        entrada.readFully(clavePublicaEncoded);
-	        return KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(clavePublicaEncoded));
-	    } catch (Exception e) {
-	        e.printStackTrace();
-	        return null;
-	    }
-	}
-
-	private static SecretKey generarClaveAES() {
-	    try {
-	        // Generar clave AES
-	        KeyGenerator keyGenerator = KeyGenerator.getInstance("AES");
-	        keyGenerator.init(BITS_CLAVE_AES);
-	        return keyGenerator.generateKey();
-	    } catch (Exception e) {
-	        e.printStackTrace();
-	        return null;
-	    }
-	}
-
-	private static byte[] cifrarAESconRSA(PublicKey clavePublicaRSA, SecretKey claveAES) {
-	    try {
-	        // Cifrar clave AES con clave pública RSA del servidor
-	        Cipher cifradorRSA = Cipher.getInstance("RSA");
-	        cifradorRSA.init(Cipher.ENCRYPT_MODE, clavePublicaRSA);
-	        return cifradorRSA.doFinal(claveAES.getEncoded());
-	    } catch (Exception e) {
-	        e.printStackTrace();
-	        return null;
-	    }
-	}
-
-	private static void enviarClaveAESCifradaAlServidor(DataOutputStream salida, byte[] claveAESCifrada) {
-	    try {
-	        // Enviar clave AES cifrada al servidor
-	        salida.writeInt(claveAESCifrada.length);
-	        salida.write(claveAESCifrada);
-	    } catch (Exception e) {
-	        e.printStackTrace();
-	    }
-	}
-	
 	
 }
